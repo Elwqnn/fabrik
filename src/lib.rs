@@ -1,7 +1,9 @@
 //! FABRIK (Forward And Backward Reaching Inverse Kinematics) implementation.
 
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+
 /// 2D point/vector
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
@@ -16,13 +18,23 @@ impl Vec2 {
     }
 
     #[inline]
-    pub fn distance(self, other: Self) -> f32 {
-        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
+    pub fn length_squared(self) -> f32 {
+        self.x * self.x + self.y * self.y
     }
 
     #[inline]
     pub fn length(self) -> f32 {
-        (self.x.powi(2) + self.y.powi(2)).sqrt()
+        self.length_squared().sqrt()
+    }
+
+    #[inline]
+    pub fn distance_squared(self, other: Self) -> f32 {
+        (self - other).length_squared()
+    }
+
+    #[inline]
+    pub fn distance(self, other: Self) -> f32 {
+        self.distance_squared(other).sqrt()
     }
 
     #[inline]
@@ -31,15 +43,19 @@ impl Vec2 {
         if len == 0.0 {
             Self::ZERO
         } else {
-            Self {
-                x: self.x / len,
-                y: self.y / len,
-            }
+            self * (1.0 / len)
         }
     }
 }
 
-impl std::ops::Add for Vec2 {
+impl From<(f32, f32)> for Vec2 {
+    #[inline]
+    fn from((x, y): (f32, f32)) -> Self {
+        Self { x, y }
+    }
+}
+
+impl Add for Vec2 {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
@@ -47,7 +63,15 @@ impl std::ops::Add for Vec2 {
     }
 }
 
-impl std::ops::Sub for Vec2 {
+impl AddAssign for Vec2 {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
+impl Sub for Vec2 {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self {
@@ -55,11 +79,27 @@ impl std::ops::Sub for Vec2 {
     }
 }
 
-impl std::ops::Mul<f32> for Vec2 {
+impl SubAssign for Vec2 {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+    }
+}
+
+impl Mul<f32> for Vec2 {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: f32) -> Self {
         Self::new(self.x * rhs, self.y * rhs)
+    }
+}
+
+impl MulAssign<f32> for Vec2 {
+    #[inline]
+    fn mul_assign(&mut self, rhs: f32) {
+        self.x *= rhs;
+        self.y *= rhs;
     }
 }
 
@@ -91,13 +131,25 @@ pub struct Chain {
     pub tolerance: f32,
     pub max_iterations: usize,
     origin: Vec2,
+    total_length: f32,
 }
 
 impl Chain {
     /// Create a new chain from config, extending upward from origin
     pub fn new(origin: Vec2, config: &ChainConfig) -> Self {
-        let mut joints = Vec::with_capacity(config.segment_count + 1);
         let lengths = vec![config.segment_length; config.segment_count];
+        Self::with_lengths(origin, lengths, config.tolerance, config.max_iterations)
+    }
+
+    /// Create a chain with variable segment lengths
+    pub fn with_lengths(
+        origin: Vec2,
+        lengths: Vec<f32>,
+        tolerance: f32,
+        max_iterations: usize,
+    ) -> Self {
+        let total_length = lengths.iter().sum();
+        let mut joints = Vec::with_capacity(lengths.len() + 1);
 
         joints.push(origin);
         let mut pos = origin;
@@ -109,9 +161,10 @@ impl Chain {
         Self {
             joints,
             lengths,
-            tolerance: config.tolerance,
-            max_iterations: config.max_iterations,
+            tolerance,
+            max_iterations,
             origin,
+            total_length,
         }
     }
 
@@ -127,14 +180,15 @@ impl Chain {
     }
 
     /// Get origin position
+    #[inline]
     pub fn origin(&self) -> Vec2 {
         self.origin
     }
 
-    /// Total reach of the chain
+    /// Total reach of the chain (cached)
     #[inline]
     pub fn total_length(&self) -> f32 {
-        self.lengths.iter().sum()
+        self.total_length
     }
 
     /// Number of joints
@@ -152,23 +206,26 @@ impl Chain {
     /// Solve IK toward target using FABRIK
     pub fn solve(&mut self, target: Vec2) {
         let base = self.joints[0];
-        let dist_to_target = base.distance(target);
+        let dist_sq = base.distance_squared(target);
+        let total_len = self.total_length;
 
         // If target is unreachable, stretch toward it
-        if dist_to_target >= self.total_length() {
+        if dist_sq >= total_len * total_len {
             let dir = (target - base).normalize();
             let mut pos = base;
             for (i, &len) in self.lengths.iter().enumerate() {
-                pos = pos + dir * len;
+                pos += dir * len;
                 self.joints[i + 1] = pos;
             }
             return;
         }
 
+        let tolerance_sq = self.tolerance * self.tolerance;
+
         // FABRIK iterations
         for _ in 0..self.max_iterations {
-            let end_effector = self.joints[self.joints.len() - 1];
-            if end_effector.distance(target) < self.tolerance {
+            let end_effector = *self.joints.last().unwrap();
+            if end_effector.distance_squared(target) < tolerance_sq {
                 break;
             }
 
