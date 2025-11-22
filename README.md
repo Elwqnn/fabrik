@@ -2,7 +2,9 @@
 
 FABRIK (Forward And Backward Reaching Inverse Kinematics) implementation in Rust.
 
-![Fabrik Demo](examples/fabrik-demo.gif)
+<p align="center">
+  <img src="examples/fabrik-demo.gif" width="50%" />
+</p>
 
 ## Library
 
