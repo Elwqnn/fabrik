@@ -2,6 +2,8 @@
 
 FABRIK (Forward And Backward Reaching Inverse Kinematics) implementation in Rust.
 
+![Fabrik Demo](examples/fabrik-demo.gif)
+
 ## Library
 
 Zero-dependency IK solver in `src/lib.rs`:
